@@ -1,0 +1,34 @@
+[Unit]
+Description=nn video service — slot cam4 (BeagleY, provisioned via BLE setup mode)
+After=network-online.target
+
+[Service]
+User=orangepi
+Environment=PYTHONPATH=/home/orangepi/nn_project_nowest/hub
+Environment=NN_CAM_ID=cam4
+Environment=NN_HLS_REENCODE=0
+ExecStart=/usr/bin/python3 /home/orangepi/nn_project_nowest/media/host/video_service.py --stream-port 8894 --control-port 8904 --keydir /var/lib/nn-media/keys4 --hls-port 5569 --hls-dir /dev/shm/nn-hls-cam4 --snapshot-dir /home/orangepi/nn_project_nowest/media/host/snapshots4 --motion-interval-ms 200 --motion-decoder auto --yolo-url "" --yolo-model /home/orangepi/models/yolox_s.cix --hub-url http://127.0.0.1:8769
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/nn-video3.service.d/hls-wallclock.conf
+[Service]
+# Re-anchor the playlist date well before it is user-visible.  The 45 s
+# default is far too lax: cam3 sat 31 s adrift and never tripped it, and
+# the webapp prints that date as the frame capture time.  Kept BELOW the
+# hub reporting limit (stream_drift_max_s, 20 s) so a stored report means
+# the watchdog failed to fix it, not merely that drift happened.
+Environment=NN_HLS_PDT_MAX_SKEW=12
+
+# /etc/systemd/system/nn-video3.service.d/inferd.conf
+[Service]
+Environment=NN_INFERD_SOCK=/run/nn-inferd/sock
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen
+
+# /etc/systemd/system/nn-video3.service.d/name.conf
+[Service]
+Environment='NN_CAM_NAME=BeagleY cam4'
+Environment=NN_CAM_URL=http://127.0.0.1:8904

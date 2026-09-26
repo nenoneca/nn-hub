@@ -1,0 +1,12 @@
+                        # nn-transcoded flushes a buffered burst the moment
+                        # ffmpeg connects; stamping those packets "now" puts
+                        # the playlist date ~10 s in the FUTURE.  Its mpegtsmux
+                        # timestamps are already sound in the small, but on
+                        # that path media time runs ~1.3 s/min slower than wall
+                        # clock, so the playlist date slides ~78 s/hour behind
+                        # and the watchdog below can only bound it, not stop it
+                        # (measured on cam1, 2026-08-17).  NN_HLS_WALLCLOCK=1
+                        # forces wall-clock stamping there too: a bounded
+                        # one-off offset beats unbounded accumulation.
+                        wallclock=(_tc_port is None or
+                                   os.environ.get("NN_HLS_WALLCLOCK") == "1")))

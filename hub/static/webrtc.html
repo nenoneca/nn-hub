@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nn camera — WebRTC</title>
+<style>
+  body { background:#111; color:#ddd; font-family: system-ui, sans-serif; margin:16px; }
+  video { max-width:90vw; border:1px solid #444; border-radius:8px; background:#000; }
+  pre { color:#8a8; font:12px/1.5 ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h3 id="hdr">nn camera (WebRTC)</h3>
+<video id="v" autoplay playsinline muted></video>
+<pre id="log"></pre>
+<script>
+// This page is served statically at /webrtc/<sid>.  It self-configures from the
+// URL: sid = last path segment; cam = ?cam= (the offer route carries a {cam}
+// segment, though the server keys each session by sid alone).
+(function () {
+  "use strict";
+  var sid = location.pathname.split("/").filter(Boolean).pop();
+  var cam = new URLSearchParams(location.search).get("cam") || "cam";
+  document.getElementById("hdr").textContent = "nn camera " + cam + " (WebRTC)";
+  var log = function (m) { document.getElementById("log").textContent += m + "\n"; };
+
+  (async function () {
+    var pc = new RTCPeerConnection();
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.ontrack = function (e) { document.getElementById("v").srcObject = e.streams[0]; log("track"); };
+    pc.onconnectionstatechange = function () { log("pc " + pc.connectionState); };
+    var offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    var r = await fetch("/api/v1/cameras/" + encodeURIComponent(cam) +
+                        "/stream/" + encodeURIComponent(sid) + "/offer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+    });
+    await pc.setRemoteDescription(await r.json());
+    log("answered");
+  })().catch(function (e) { log("ERR " + e); });
+})();
+</script>
+</body>
+</html>

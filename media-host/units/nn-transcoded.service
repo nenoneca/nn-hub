@@ -1,0 +1,19 @@
+[Unit]
+Description=nn-transcoded — shared hardware transcode service (WAVE5/CIX)
+After=network.target
+Before=nn-video.service nn-video2.service nn-video3.service
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+RuntimeDirectory=nn-transcoded
+RuntimeDirectoryMode=0755
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen
+ExecStart=/usr/bin/python3 nn_transcoded.py --socket /run/nn-transcoded/sock --base-port 5700
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

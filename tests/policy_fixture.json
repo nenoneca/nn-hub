@@ -1,0 +1,28 @@
+{
+  "_comment": "Shared C/Python fixture. Each case: policy + a sequence of per-frame conf_x1000, and the expected (aggregate, detected) after each step.",
+  "cases": [
+    {"name": "ramp-up crosses start, hysteresis holds through a dip",
+     "policy": {"agg": 5, "start": 600, "stop": 400},
+     "feed":     [1000, 1000, 1000, 1000,  0,   0,    0,   0],
+     "agg":      [ 200,  400,  600,  800, 800, 600,  400, 200],
+     "detected": [false, false, true, true, true, true, true, false]},
+
+    {"name": "single spike must not trigger (mean, not max)",
+     "policy": {"agg": 5, "start": 600, "stop": 400},
+     "feed":     [1000,   0,    0,    0,    0],
+     "agg":      [ 200,  200,  200,  200,  200],
+     "detected": [false, false, false, false, false]},
+
+    {"name": "agg=1 is instantaneous",
+     "policy": {"agg": 1, "start": 500, "stop": 500},
+     "feed":     [900,  100,  900],
+     "agg":      [900,  100,  900],
+     "detected": [true, false, true]},
+
+    {"name": "stop clamped to start when misconfigured",
+     "policy": {"agg": 2, "start": 500, "stop": 900},
+     "feed":     [1000, 1000,   0],
+     "agg":      [ 500, 1000, 500],
+     "detected": [true, true, true]}
+  ]
+}

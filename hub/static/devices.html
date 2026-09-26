@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>nn hub — devices</title>
+<link rel="stylesheet" href="/app/app.css?v=20260926inf2">
+</head>
+<body>
+<header id="hdr">
+  <button id="nav-toggle" class="back" aria-label="Menu">☰</button>
+  <button id="back" class="back" hidden>‹ Devices</button>
+  <span id="title">Devices</span>
+  <span id="hdr-info"></span>
+</header>
+
+<div id="shell">
+  <nav id="sidebar">
+    <a class="navitem" href="#/" data-nav="devices"><span>▦</span> Devices</a>
+    <a class="navitem" href="#/automation" data-nav="automation"><span>⚡</span> Automation</a>
+    <a class="navitem" href="#/gateway" data-nav="gateway"><span>⇄</span> Gateway</a>
+    <a class="navitem" href="#/factory" data-nav="factory"><span>🛠</span> Factory</a>
+    <a class="navitem" href="#/logging" data-nav="logging"><span>▤</span> Logging</a>
+    <a class="navitem" href="#/settings" data-nav="settings"><span>⚙</span> Settings</a>
+  </nav>
+  <main id="app"><div class="empty">loading…</div></main>
+</div>
+<div id="nav-scrim" hidden></div>
+
+<!-- jmuxer is served locally by the hub (single origin); it exposes window.JMuxer -->
+<script src="/app/jmuxer.min.js"></script>
+<script src="/app/applib.js?v=20260924zc"></script>
+<script src="/app/app.js?v=20260926inf2"></script>
+</body>
+</html>

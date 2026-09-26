@@ -1,0 +1,24 @@
+[Unit]
+Description=nn-inferd — shared inference service (one model per accelerator)
+# Cameras fall back to a private detector if this is not up, so it is a
+# Wants (not Requires) on their side; starting first just avoids the churn.
+Before=nn-video.service nn-video2.service nn-video3.service
+After=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+# /run/nn-inferd/ is created and owned by systemd for this unit; the socket
+# lives there rather than /tmp so it cannot be squatted or swept.
+RuntimeDirectory=nn-inferd
+RuntimeDirectoryMode=0750
+Environment=NN_ACCEL_PY=/opt/nn-accel/py
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+ExecStart=/usr/bin/python3 nn_inferd.py --socket /run/nn-inferd/sock \
+  --model /home/orangepi/models/yolox_s.cix --aipu-parallel 2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

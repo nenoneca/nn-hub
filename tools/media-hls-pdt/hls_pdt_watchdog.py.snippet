@@ -1,0 +1,62 @@
+        def _pdt_skew():
+            """Seconds the playlist's EXT-X-PROGRAM-DATE-TIME lags wall clock,
+            or None if it can't be read."""
+            import datetime as _dt, re as _re
+            try:
+                with open(os.path.join(HLS_DIR, "live.m3u8")) as _f:
+                    m = None
+                    for _ln in _f:
+                        if _ln.startswith("#EXT-X-PROGRAM-DATE-TIME:"):
+                            m = _ln.split(":", 1)[1].strip()
+                    if not m:
+                        return None
+                stamp = _dt.datetime.fromisoformat(m)
+                now = _dt.datetime.now(stamp.tzinfo)
+                return (now - stamp).total_seconds()
+            except Exception:
+                return None
+
+        def _hls_ts():
+            # ffmpeg anchors PROGRAM-DATE-TIME once and then advances it by
+            # MEDIA time, so every stall (camera reconnect, codec hiccup,
+            # service restart with no video) permanently pushes the playlist
+            # date behind wall clock — measured 11m31s on cam3, and the live
+            # view shows that date as the capture time.
+            # -use_wallclock_as_timestamps fixes it, but it cannot be used on
+            # the nn-transcoded path (its connect-time burst would stamp the
+            # date into the FUTURE).  So: watch the skew and re-anchor by
+            # restarting the ffmpeg leg when it drifts too far.  One ~2 s
+            # segment gap, only when actually needed.
+            PDT_MAX_SKEW = float(os.environ.get("NN_HLS_PDT_MAX_SKEW", "45"))
+            while True:
+                os.makedirs(HLS_DIR, exist_ok=True)
+                proc = None
+                try:
+                    proc = _sp.Popen(_ffmpeg_hls_cmd(
+                        ["-f", "mpegts", "-i", f"tcp://127.0.0.1:{_hls_src_port}"],
+                        # nn-transcoded flushes a buffered burst the moment
+                        # ffmpeg connects; stamping those packets "now" puts
+                        # the playlist date ~10 s in the FUTURE.  Its mpegtsmux
+                        # timestamps are already sound, so leave them alone.
+                        wallclock=(_tc_port is None)))
+                    while True:
+                        try:
+                            proc.wait(timeout=30)
+                            break                      # ffmpeg exited on its own
+                        except _sp.TimeoutExpired:
+                            pass
+                        skew = _pdt_skew()
+                        if skew is not None and skew > PDT_MAX_SKEW:
+                            print(f">> HLS: playlist date {skew:.0f}s behind wall "
+                                  f"clock — re-anchoring", flush=True)
+                            proc.terminate()
+                            try: proc.wait(timeout=10)
+                            except Exception: proc.kill()
+                            break
+                except Exception as e:
+                    print(">> HLS ts error:", e, flush=True)
+                    if proc is not None:
+                        try: proc.kill()
+                        except Exception: pass
+                time.sleep(2)
+        

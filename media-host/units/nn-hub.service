@@ -1,0 +1,37 @@
+[Unit]
+Description=nn-hub server (REST API + nn_proto + WebSocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/opt/nn-hub
+ExecStart=/opt/nn-hub/venv/bin/nn-hub serve --api-host 0.0.0.0
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/nn-hub.service.d/bleadapter.conf
+[Service]
+# Which local Bluetooth radio the hub's BLE tooling uses.
+# hci0 = the on-board PCIe card's radio, now that the Athena antenna is fitted.
+# Before the antenna it heard every device flat at -96..-102 dBm (noise floor)
+# and could not complete a central-role connection; measured against the CSR
+# dongle on 17 devices seen by both it is now ~11 dB weaker but no longer deaf.
+# Pinned explicitly rather than relying on BlueZ's "first adapter", so plugging
+# in any USB dongle later cannot silently reorder which radio gets used.
+Environment=NN_BLE_ADAPTER=hci0
+
+# /etc/systemd/system/nn-hub.service.d/cameras.conf
+[Service]
+# Two cameras, each served by its own video_service instance on this host:
+#   cam0 :8899  ESP32-P4-WIFI6  + IMX708 (standard)
+#   cam1 :8900  ESP32-P4-Module + IMX708 Camera Module 3 Wide NoIR
+# The hub PROXIES each one's snapshot/live/HLS/detections under its own origin.
+# NOTE the SINGLE quotes: systemd strips bare double quotes from Environment=
+# values, which silently mangles the JSON into [{id:cam0,...}] -> json.loads
+# fails -> cameras.py falls back to a single default camera.
+Environment='NN_CAMERAS=[{"id":"cam0","name":"Camera 1","url":"http://127.0.0.1:8899"},{"id":"cam1","name":"Wide NoIR","url":"http://127.0.0.1:8900"}]'

@@ -1,0 +1,138 @@
+    # Operator strategy (webapp: camera Settings).  Fetched from the hub
+    # every POLICY_REFRESH_S so a change takes effect without a restart.
+    #   quality : pin fps at the chosen level, let bitrate ride to whatever
+    #             the link sustains — sharp picture, fewer frames.
+    #   fps     : hold full fps and shed bitrate first; only once bitrate is
+    #             at the chosen floor do we start dropping frames.
+    POLICY_REFRESH_S = 10.0
+    FPS_DIV_MAX = 6            # 30 fps / 6 = 5 fps, the slowest we will go
+
+    def __init__(self, sess, fps=30, start_bitrate=3_000_000):
+        self.sess = sess; self.fps = fps
+        self.br = start_bitrate; self.n = 0
+        self.mode = "fps"          # default: today's behaviour
+        self.level = 5
+        self.br_floor = self.BR_MIN
+        self.target_fps = fps
+        self.fps_div = 1
+        self._policy_at = 0.0
+        self.net_kbps = 0
+        self._last_seq = None
+        self._gaps = self._frames = self._bytes = 0
+        self._lock = threading.Lock()
+        self._send_lock = threading.Lock()
+        self._stop = threading.Event()
+        self._th = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self):
+        self._send(self.CMD_GOP, self.fps << self.n)
+        self._send(self.CMD_BITRATE, self.br)
+        self._th.start()
+
+    def force_idr(self):
+        """Ask the device for an immediate IDR (new viewer joined — gives the
+        stream a decode point now instead of up to one GOP later)."""
+        self._send(self.CMD_FORCE_IDR, 0)
+
+    def stop(self):
+        self._stop.set()
+
+    def on_video(self, seq, flags, nbytes):
+        with self._lock:
+            self._bytes += nbytes
+            if flags & 0x02:                       # VID_START = a new frame
+                if self._last_seq is not None:
+                    gap = (seq - self._last_seq - 1) & 0xFFFF
+                    if 0 < gap < 1000:             # ignore u16 wrap / reorder
+                        self._gaps += gap
+                self._last_seq = seq
+                self._frames += 1
+
+    def _send(self, cmd, value):
+        try:
+            # serialized: the adapt thread and viewer-join force_idr() both send
+            # on the same sectun session; concurrent sends corrupt the cipher stream
+            with self._send_lock:
+                self.sess.send(bytes([self.MAGIC, cmd]) +
+                               struct.pack(">I", int(value) & 0xFFFFFFFF))
+        except Exception as e:
+            print(f">> adapt: send failed: {e}", file=sys.stderr, flush=True)
+
+    def _loop(self):
+        while not self._stop.wait(1.0):
+            with self._lock:
+                gaps, frames = self._gaps, self._frames
+                kbps = self._bytes * 8 / 1000.0
+                self._gaps = self._frames = self._bytes = 0
+            if frames == 0:                        # stream idle this window
+                continue
+            self.net_kbps = max(self.net_kbps, int(kbps))   # high-water mark
+            self._refresh_policy()
+
+            if self.mode == "quality":
+                # Frames are the sacrifice: hold the chosen fps and let
+                # bitrate probe up to whatever the link carries.
+                want_div = max(1, min(self.FPS_DIV_MAX,
+                                      round(self.fps / max(1, self.target_fps))))
+                if want_div != self.fps_div:
+                    self.fps_div = want_div
+                    self._send(self.CMD_FPS_DIV, self.fps_div)
+                if gaps > 0:
+                    self.br = max(int(self.br * 0.8), self.BR_MIN); self.n = 0
+                else:
+                    self.br = min(self.br + self.BR_UP, self.BR_MAX)
+                    self.n = min(self.n + 1, self.N_MAX)
+            else:
+                # Motion is the priority: shed bitrate down to the operator's
+                # floor first, and only then start dropping frames.  Recover
+                # in the reverse order — frames back before bitrate — so the
+                # stream returns to full motion as soon as it can.
+                if gaps > 0:
+                    if self.br > self.br_floor:
+                        self.br = max(int(self.br * 0.8), self.br_floor)
+                    elif self.fps_div < self.FPS_DIV_MAX:
+                        self.fps_div += 1
+                        self._send(self.CMD_FPS_DIV, self.fps_div)
+                    self.n = 0
+                else:
+                    if self.fps_div > 1:
+                        self.fps_div -= 1
+                        self._send(self.CMD_FPS_DIV, self.fps_div)
+                    else:
+                        self.br = min(self.br + self.BR_UP, self.BR_MAX)
+                        self.n = min(self.n + 1, self.N_MAX)
+            gop = self.fps << self.n
+            self._send(self.CMD_BITRATE, self.br)
+            self._send(self.CMD_GOP, gop)
+            print(f">> adapt[{self.mode}]: drops={gaps} rx={kbps:.0f}kbps -> "
+                  f"bitrate={self.br} gop={gop} fps={self.fps // self.fps_div} "
+                  f"(N={self.n})", file=sys.stderr, flush=True)
+
+
+...
+    def _refresh_policy(self):
+        """Pull the operator's strategy from the hub.  Failures are silent and
+        keep the last known policy — a hub hiccup must not change how a
+        camera streams."""
+        now = time.time()
+        if now - self._policy_at < self.POLICY_REFRESH_S:
+            return
+        self._policy_at = now
+        cam = os.environ.get("NN_CAM_ID", "")
+        if not cam:
+            return
+        try:
+            import urllib.request as _u
+            with _u.urlopen(
+                    f"http://127.0.0.1:8769/api/v1/cameras/{cam}/stream-policy",
+                    timeout=3) as r:
+                d = json.loads(r.read().decode())
+        except Exception:
+            return
+        self.mode = d.get("mode", self.mode)
+        self.level = int(d.get("level", self.level))
+        val = d.get("value")
+        if d.get("unit") == "fps" and val:
+            self.target_fps = max(1, int(val))
+        elif d.get("unit") == "kbps" and val:
+            self.br_floor = max(self.BR_MIN, int(val) * 1000)

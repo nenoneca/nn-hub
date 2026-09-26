@@ -1,0 +1,10 @@
+            # Bound what the sink will hold for a consumer.  With the
+            # defaults (units-max = -1) a single slow moment builds a
+            # backlog that NEVER drains: cam1's HLS ran ~25 s behind live
+            # with 4.6 s segments while the in-process cameras held ~1 s
+            # (measured 2026-08-17).  Cap the queue at 2 s of media and
+            # recover to a keyframe when a consumer falls behind — a
+            # viewer would rather skip forward than watch the past.
+            f"tcpserversink host=127.0.0.1 port={self.out_port} sync=false "
+            f"unit-format=time units-max=2000000000 units-soft-max=1000000000 "
+            f"recover-policy=keyframe sync-method=latest-keyframe")

@@ -1,0 +1,39 @@
+static void status_task(void *arg)
+{
+    (void)arg;
+    static uint16_t seq;
+    static char js[640];
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (!nn_netstream_is_streaming()) continue;
+        float r, b; nn_camera_get_wb(&r, &b);
+        int expo = 0, gain = 0, bri = 0, con = 0, sat = 0;
+        nn_camera_isp_get("exposure", &expo);
+        nn_camera_isp_get("gain", &gain);
+        nn_camera_isp_get("brightness", &bri);
+        nn_camera_isp_get("contrast", &con);
+        nn_camera_isp_get("saturation", &sat);
+        /* Firmware identity travels with the status record: "fw" is the
+         * build version, "img" the project name.  The hub keys its OTA
+         * catalog by image name for sensors (INFO_REPLY "img"); cameras
+         * report the same way so one mechanism covers the whole fleet. */
+        const esp_app_desc_t *desc = esp_app_get_description();
+
+        int len = snprintf(js, sizeof js,
+            "{\"wb_r\":%d,\"wb_b\":%d,\"focus\":%d,\"exposure\":%d,\"gain\":%d,"
+            "\"brightness\":%d,\"contrast\":%d,\"saturation\":%d,"
+            "\"bitrate\":%lu,\"gop\":%lu,\"fps_div\":%u,\"res\":\"%ux%u\",\"fps\":%lu,"
+            "\"fw\":\"%s\",\"img\":\"%s\"}",
+            (int)(r * 1000.0f + 0.5f), (int)(b * 1000.0f + 0.5f), s_sh_focus,
+            expo, gain, bri, con, sat,
+            (unsigned long)s_sh_bitrate, (unsigned long)s_sh_gop,
+            (unsigned)nn_camera_get_fps_divisor(),
+            CONFIG_NN_CAMERA_HRES, CONFIG_NN_CAMERA_VRES,
+            (unsigned long)nn_camera_get_base_fps(),
+            desc ? desc->version : "", desc ? desc->project_name : "");
+        if (len > 0)
+            nn_netstream_send_record(NN_REC_STATUS, 0, seq++,
+                                     (uint64_t)(esp_timer_get_time() / 1000),
+                                     (const uint8_t *)js, (size_t)len);
+    }
+}

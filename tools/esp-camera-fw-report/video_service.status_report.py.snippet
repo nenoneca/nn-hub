@@ -1,0 +1,34 @@
+if typ == NN_REC_STATUS:
+                        try:
+                            svc.cam_settings = json.loads(payload.decode())
+                            svc.cam_settings_ts = time.time()
+                            # Firmware identity ride-along: report it to the
+                            # hub the same way the BeagleY camera's OTA agent
+                            # does, so every camera's running version is
+                            # visible in one place (webapp camera Settings).
+                            _fw = svc.cam_settings.get("fw")
+                            _img = svc.cam_settings.get("img")
+                            # Re-report on change AND periodically: reporting
+                            # once per connection made the hub's copy age out
+                            # (and never recover if the hub lost it), so a
+                            # camera that had not reconnected in hours looked
+                            # stale even though it was streaming fine.
+                            _due = (time.time() - getattr(svc, "_fw_reported_at", 0)) > 900
+                            if _fw and _img and (_fw != getattr(svc, "_fw_reported", None) or _due):
+                                svc._fw_reported = _fw
+                                svc._fw_reported_at = time.time()
+                                try:
+                                    import urllib.request as _u
+                                    _cam = getattr(svc, "cam_id", None) or os.environ.get("NN_CAM_ID", "")
+                                    if _cam:
+                                        _b = json.dumps({"version": _fw,
+                                                         "device_type": _img}).encode()
+                                        _rq = _u.Request(
+                                            f"http://127.0.0.1:8769/api/v1/cameras/{_cam}/bundle",
+                                            data=_b, method="PUT",
+                                            headers={"Content-Type": "application/json"})
+                                        _u.urlopen(_rq, timeout=5).read()
+                                        print(f">> reported firmware {_fw} ({_img}) to hub")
+                                except Exception as _e:
+                                    print(f">> firmware report failed: {_e}")
+                            

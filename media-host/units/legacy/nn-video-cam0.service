@@ -1,0 +1,45 @@
+[Unit]
+Description=nn media video service (nn_sectun ingest + GStreamer + control API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+# hub package provides hub.crypto, needed by the nn_sectun ingest thread
+Environment=PYTHONPATH=/home/orangepi/nn_project_nowest/hub
+# --yolo-model *.cix  -> YOLOX runs on the CIX P1 NPU (Zhouyi AIPU) via NOE_Engine.
+#   ~34 ms/inference vs ~307 ms on CPU onnxruntime.
+#   Model: yolox_s.cix from the CIX AI Model Hub (ModelScope cix/ai_model_hub_25_Q3).
+# --yolo-url ""       -> disable the beagle-era HTTP NPU-server probe (:8901 doesn't
+#   exist here); without this it logs "NPU unavailable (Connection refused)" first.
+ExecStart=/usr/bin/python3 /home/orangepi/nn_project_nowest/media/host/video_service.py \
+    --stream-port 8888 --control-port 8899 \
+    --keydir /var/lib/nn-media/keys --hls-dir /dev/shm/nn-hls-cam0 \
+    --motion-interval-ms 200 --motion-decoder auto \
+    --yolo-url "" --enc-qp 36 \
+    --yolo-model /home/orangepi/models/yolox_s.cix
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/nn-video.service.d/camid.conf
+[Service]
+Environment=NN_CAM_ID=cam0
+
+# /etc/systemd/system/nn-video.service.d/hls-wallclock.conf
+[Service]
+# Re-anchor the playlist date well before it is user-visible.  The 45 s
+# default is far too lax: cam3 sat 31 s adrift and never tripped it, and
+# the webapp prints that date as the frame capture time.  Kept BELOW the
+# hub reporting limit (stream_drift_max_s, 20 s) so a stored report means
+# the watchdog failed to fix it, not merely that drift happened.
+Environment=NN_HLS_PDT_MAX_SKEW=12
+
+# /etc/systemd/system/nn-video.service.d/inferd.conf
+[Service]
+Environment=NN_INFERD_SOCK=/run/nn-inferd/sock
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen

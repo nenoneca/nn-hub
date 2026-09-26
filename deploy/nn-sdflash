@@ -1,0 +1,152 @@
+#!/bin/bash
+# nn-sdflash — the ONLY code path that writes a whole-disk image from the hub.
+#
+# The hub process is unprivileged and its device port (:8769) is reachable
+# from the LAN, so this helper trusts NOTHING its caller says: it re-derives
+# every safety rule itself from the kernel before touching a byte.
+#
+# Installed root:root 0755 in /usr/local/sbin and allowed through exactly
+# one sudoers line (see nn-sdflash.sudoers / install-sdflash.sh).
+#
+#   nn-sdflash check <disk>
+#   nn-sdflash write <disk> <image.img.xz> [--raw-size N] [--raw-sha256 HEX]
+#                    [--no-verify] [--dry-run]
+#
+# A <disk> is eligible only if ALL hold:
+#   * it is a whole disk (not a partition), node /dev/sdX or /dev/mmcblkN;
+#   * the kernel flags it removable or hotplug;
+#   * its transport is usb, or it is an SD/MMC slot (mmcblk);
+#   * no partition of it is mounted anywhere except under /media, /run/media
+#     or /mnt (i.e. it holds no system mount — the root disk can never match);
+#   * it is not the disk behind "/".
+# Automounts (udisks) under those prefixes are unmounted before writing.
+#
+# Progress: dd's status=progress lines go to stderr ("<N> bytes ... copied").
+# Phases are announced on stdout as "PHASE <name>"; the last stdout line is
+# "NN_SDFLASH_RESULT <json>".
+set -euo pipefail
+
+die() { echo "NN_SDFLASH_RESULT {\"ok\":false,\"error\":$(printf '%s' "$*" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')}"; exit "${RC:-2}"; }
+phase() { echo "PHASE $1"; }
+
+[ $# -ge 2 ] || { echo "usage: nn-sdflash check|write <disk> [image.img.xz] [opts]" >&2; exit 64; }
+CMD=$1; DISK=$2; shift 2
+
+# ── eligibility (kernel-derived, caller-independent) ────────────────────────
+case "$DISK" in
+    /dev/sd[a-z]|/dev/sd[a-z][a-z]|/dev/mmcblk[0-9]|/dev/mmcblk[0-9][0-9]) ;;
+    *) RC=3 die "refusing $DISK: not a whole USB/SD disk node" ;;
+esac
+[ -b "$DISK" ] || { RC=3 die "refusing $DISK: not a block device"; }
+
+read -r TYPE RM HOTPLUG TRAN < <(lsblk -dnr -o TYPE,RM,HOTPLUG,TRAN "$DISK" | awk '{print $1, $2, $3, ($4==""?"-":$4)}')
+[ "$TYPE" = "disk" ] || { RC=3 die "refusing $DISK: type is $TYPE, not a whole disk"; }
+[ "$RM" = "1" ] || [ "$HOTPLUG" = "1" ] || { RC=3 die "refusing $DISK: kernel does not flag it removable/hotplug"; }
+case "$DISK:$TRAN" in
+    *:usb) ;;
+    /dev/mmcblk*:-|/dev/mmcblk*:mmc) ;;
+    *) RC=3 die "refusing $DISK: transport '$TRAN' is not usb/sd" ;;
+esac
+
+ROOT_SRC=$(findmnt -n -o SOURCE / || true)
+case "$ROOT_SRC" in
+    "$DISK"*) RC=3 die "refusing $DISK: it holds the root filesystem" ;;
+esac
+
+# every mount on the disk or its partitions
+MOUNTS=()
+while IFS= read -r part; do
+    while IFS= read -r tgt; do
+        [ -n "$tgt" ] && MOUNTS+=("$part $tgt")
+    done < <(findmnt -n -o TARGET -S "$part" 2>/dev/null || true)
+done < <(lsblk -nr -o PATH "$DISK")     # raw = one node per line, disk + partitions
+# the scan above is the safety net; refuse to proceed if it produced nothing
+[ -n "$(lsblk -nr -o PATH "$DISK")" ] || { RC=2 die "lsblk could not enumerate $DISK"; }
+for m in "${MOUNTS[@]:-}"; do
+    [ -z "$m" ] && continue
+    tgt=${m#* }
+    case "$tgt" in
+        /media/*|/run/media/*|/mnt/*) ;;
+        *) RC=3 die "refusing $DISK: ${m%% *} is mounted at $tgt (a system mount)" ;;
+    esac
+done
+
+SIZE=$(blockdev --getsize64 "$DISK" 2>/dev/null || echo 0)
+[ "$SIZE" -gt 0 ] || { RC=4 die "no media: $DISK reports size 0 (is a card in the reader?)"; }
+
+if [ "$CMD" = "check" ]; then
+    echo "NN_SDFLASH_RESULT {\"ok\":true,\"disk\":\"$DISK\",\"size_bytes\":$SIZE,\"mounts\":${#MOUNTS[@]}}"
+    exit 0
+fi
+[ "$CMD" = "write" ] || { echo "unknown command $CMD" >&2; exit 64; }
+
+# ── write arguments ─────────────────────────────────────────────────────────
+IMAGE=${1:-}; shift || true
+[ -n "$IMAGE" ] && [ -f "$IMAGE" ] || { RC=2 die "image file not found: '$IMAGE'"; }
+RAW_SIZE=0; RAW_SHA=""; VERIFY=1; DRY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --raw-size)   RAW_SIZE=$2; shift 2 ;;
+        --raw-sha256) RAW_SHA=$2; shift 2 ;;
+        --no-verify)  VERIFY=0; shift ;;
+        --dry-run)    DRY=1; shift ;;
+        *) RC=64 die "unknown option $1" ;;
+    esac
+done
+if [ "$RAW_SIZE" -le 0 ]; then
+    # xz knows the uncompressed size from the index — no full decompression
+    RAW_SIZE=$(xz -l --robot "$IMAGE" | awk '$1=="totals"{print $5}')
+fi
+[ "$RAW_SIZE" -gt 0 ] || { RC=2 die "cannot determine the uncompressed size of $IMAGE"; }
+[ "$SIZE" -ge "$RAW_SIZE" ] || { RC=5 die "card too small: $DISK is $SIZE bytes, image needs $RAW_SIZE"; }
+
+if [ "$DRY" = 1 ]; then
+    echo "NN_SDFLASH_RESULT {\"ok\":true,\"dry_run\":true,\"disk\":\"$DISK\",\"size_bytes\":$SIZE,\"raw_size\":$RAW_SIZE,\"mounts\":${#MOUNTS[@]}}"
+    exit 0
+fi
+
+# ── unmount automounts, then write ──────────────────────────────────────────
+phase unmount
+for m in "${MOUNTS[@]:-}"; do
+    [ -z "$m" ] && continue
+    part=${m%% *}
+    udisksctl unmount -b "$part" --no-user-interaction >/dev/null 2>&1 || umount "$part" || { RC=6 die "could not unmount $part"; }
+done
+# stop udisks from re-mounting a half-written table mid-flash
+udevadm settle || true
+
+phase write
+STREAM_SHA_FILE=$(mktemp)
+trap 'rm -f "$STREAM_SHA_FILE"' EXIT
+# tee splits the decompressed stream: one copy hashed, one written.  dd's
+# progress goes to OUR stderr for the hub to parse.  conv=fsync makes dd
+# block until the card has the data, so "done" means written, not cached.
+set +e
+xz -dc "$IMAGE" \
+  | tee >(sha256sum | awk '{print $1}' > "$STREAM_SHA_FILE") \
+  | dd of="$DISK" bs=4M iflag=fullblock conv=fsync status=progress
+rc=${PIPESTATUS[2]}
+set -e
+[ "$rc" = 0 ] || { RC=7 die "dd exited $rc while writing $DISK"; }
+sync
+# tee's process substitution may still be finishing the hash
+for _ in $(seq 1 50); do [ -s "$STREAM_SHA_FILE" ] && break; sleep 0.2; done
+STREAM_SHA=$(cat "$STREAM_SHA_FILE")
+if [ -n "$RAW_SHA" ] && [ "$STREAM_SHA" != "$RAW_SHA" ]; then
+    RC=8 die "image corrupt: decompressed stream sha256 $STREAM_SHA != manifest raw_sha256 $RAW_SHA (card now holds a bad image)"
+fi
+
+VERIFIED=false
+if [ "$VERIFY" = 1 ]; then
+    phase verify
+    # drop the page cache so the read-back comes from the card, not RAM
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    READ_SHA=$(head -c "$RAW_SIZE" "$DISK" | sha256sum | awk '{print $1}')
+    [ "$READ_SHA" = "$STREAM_SHA" ] || { RC=9 die "verify failed: card reads back $READ_SHA, wrote $STREAM_SHA"; }
+    VERIFIED=true
+fi
+
+phase finalize
+blockdev --rereadpt "$DISK" 2>/dev/null || partprobe "$DISK" 2>/dev/null || true
+udevadm settle || true
+echo "NN_SDFLASH_RESULT {\"ok\":true,\"disk\":\"$DISK\",\"raw_size\":$RAW_SIZE,\"raw_sha256\":\"$STREAM_SHA\",\"verified\":$VERIFIED}"

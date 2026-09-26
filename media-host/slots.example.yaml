@@ -1,0 +1,54 @@
+# /etc/nn-media/slots.yaml — every camera slot the nn-video supervisor runs.
+# This example is the OrangePi bench as of 2026-09-21 (the four former units
+# nn-video, nn-video2, nn-video3, nn-video4).  Ports, directories and key
+# directories are unchanged, so the hub's slot URLs still resolve.
+# Slots can also be added/removed live: POST/DELETE http://127.0.0.1:8898/slots
+hub_url: http://127.0.0.1:8769
+hang_grace_s: 90
+env:                                   # applied to every worker
+  PYTHONPATH: /home/orangepi/nn_project_nowest/hub
+  NN_HLS_PDT_MAX_SKEW: "12"
+  NN_INFERD_SOCK: /run/nn-inferd/sock
+  NN_ACCEL_GEN: /opt/nn-accel/gen
+slots:
+  - id: cam0
+    name: Camera 1
+    stream_port: 8888
+    control_port: 8899
+    keydir: /var/lib/nn-media/keys
+    hls_dir: /dev/shm/nn-hls-cam0
+    args: ["--motion-interval-ms", "200", "--motion-decoder", "auto", "--yolo-url", "",
+           "--enc-qp", "36", "--yolo-model", "/home/orangepi/models/yolox_s.cix"]
+  - id: cam1
+    name: Wide NoIR
+    stream_port: 8890
+    control_port: 8900
+    hls_port: 5567
+    keydir: /var/lib/nn-media/keys2
+    hls_dir: /dev/shm/nn-hls-cam1
+    snapshot_dir: /home/orangepi/nn_project_nowest/media/host/snapshots2
+    env: {NN_HLS_WALLCLOCK: "1", NN_TRANSCODED: "1"}
+    args: ["--motion-interval-ms", "200", "--motion-decoder", "auto", "--yolo-url", "",
+           "--enc-qp", "36", "--yolo-model", "/home/orangepi/models/yolox_s.cix"]
+  - id: cam3
+    name: BeagleY Wide NoIR
+    stream_port: 8892
+    control_port: 8902
+    hls_port: 5568
+    keydir: /var/lib/nn-media/keys3
+    hls_dir: /dev/shm/nn-hls-cam3
+    snapshot_dir: /home/orangepi/nn_project_nowest/media/host/snapshots3
+    env: {NN_HLS_REENCODE: "0"}
+    args: ["--motion-interval-ms", "200", "--motion-decoder", "auto", "--yolo-url", "",
+           "--yolo-model", "/home/orangepi/models/yolox_s.cix"]
+  - id: cam4
+    name: BeagleY cam4
+    stream_port: 8894
+    control_port: 8904
+    hls_port: 5569
+    keydir: /var/lib/nn-media/keys4
+    hls_dir: /dev/shm/nn-hls-cam4
+    snapshot_dir: /home/orangepi/nn_project_nowest/media/host/snapshots4
+    env: {NN_HLS_REENCODE: "0"}
+    args: ["--motion-interval-ms", "200", "--motion-decoder", "auto", "--yolo-url", "",
+           "--yolo-model", "/home/orangepi/models/yolox_s.cix"]

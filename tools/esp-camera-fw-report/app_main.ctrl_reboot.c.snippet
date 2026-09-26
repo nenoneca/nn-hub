@@ -1,0 +1,27 @@
+/* ESP camera (nn-app-media/main/app_main.c) — CTRL_REBOOT support.
+ * Applied to the media tree 2026-08-19 (that tree is NOT git; this
+ * snippet is the record).  NOT YET FLASHED — lands with the next bench
+ * flash of cam0/cam1.  Old firmware's `default: return;` ignores cmd 20,
+ * so the webapp Reboot button is harmless against it (shows "no effect").
+ */
+
+// with the other CTRL_* defines (5..11 are camera tuning):
+#define CTRL_REBOOT    20u  /* operator reboot from the hub webapp */
+
+// in on_control()'s switch, before `default:`:
+    case CTRL_REBOOT:
+        /* Let the last frames drain before the reset: a warm reboot
+         * mid-frame is what most often desyncs the C6 link. */
+        printf("ctrl: REBOOT requested - esp_restart in 500ms\n");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+        return;
+
+// and near the top:  #include "esp_system.h"
+
+/* ── ALSO flash-gated (same next bench flash): uptime in the status
+ * record.  The 5 s status record is the ESP camera's de-facto heartbeat;
+ * "up" rides it so the hub shows device uptime with zero new traffic.
+ * Format string gains  ,\"up\":%llu  and the args gain
+ *   (unsigned long long)(esp_timer_get_time() / 1000000)
+ * Until flashed, /api/camera/uptime answers 404 "firmware predates it". */

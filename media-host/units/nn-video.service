@@ -1,0 +1,20 @@
+[Unit]
+Description=nn-video — one service for every camera slot (supervised per-slot workers)
+After=network-online.target nn-inferd.service nn-transcoded.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+Environment=PYTHONUNBUFFERED=1
+# slot table: ports, directories, per-slot env; no credentials (keys stay under /var/lib/nn-media)
+ExecStart=/usr/bin/python3 /home/orangepi/nn_project_nowest/media/host/video_supervisor.py --slots /etc/nn-media/slots.yaml --api-port 8898 --hub-url http://127.0.0.1:8769
+Restart=always
+RestartSec=3
+# the supervisor stops every worker on TERM; give the pipelines time to wind down
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

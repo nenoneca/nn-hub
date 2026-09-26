@@ -1,0 +1,36 @@
+# Host-side test gate: every suite that runs without hardware.
+# Bench E2E (provisioning, OTA, radio) stays manual by design.
+name: tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          pip install -e .
+          # detools backs the binary-delta OTA tests (chunk-diff patch offers)
+          pip install pytest pytest-asyncio numpy detools
+      - name: Run pytest (hub + media logic)
+        run: pytest tests/ -q
+
+  webapp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax gate (the SyntaxError-in-prod lesson, 2026-08-28)
+        run: |
+          node --check hub/static/applib.js
+          node --check hub/static/app.js
+      - name: Unit tests (applib)
+        run: node --test tests/

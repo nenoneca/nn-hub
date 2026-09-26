@@ -1,0 +1,8 @@
+[Unit]
+Description=nn app-bundle OTA agent tick
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+[Install]
+WantedBy=timers.target

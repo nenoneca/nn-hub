@@ -1,0 +1,56 @@
+[Unit]
+Description=nn media video service #2 (camera 2: ESP32-P4-Module + IMX708 wide NoIR)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+Environment=PYTHONPATH=/home/orangepi/nn_project_nowest/hub
+# Second camera instance.  EVERY per-instance path/port must differ from
+# nn-video.service or the two fight:
+#   --hls-port 5567 --hls-dir      the HLS dir is WIPED at startup; sharing it would make each
+#                  service delete the other's segments and stall both live views
+#   --keydir       its own X25519 identity, so this camera is provisioned to THIS
+#                  instance while camera 1 keeps its own key
+#   --snapshot-dir separate latest.jpg
+ExecStart=/usr/bin/python3 /home/orangepi/nn_project_nowest/media/host/video_service.py --stream-port 8890 --control-port 8900 --keydir /var/lib/nn-media/keys2 --hls-port 5567 --hls-dir /dev/shm/nn-hls-cam1 --snapshot-dir /home/orangepi/nn_project_nowest/media/host/snapshots2 --motion-interval-ms 200 --motion-decoder auto --yolo-url "" --enc-qp 36 --yolo-model /home/orangepi/models/yolox_s.cix
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/nn-video2.service.d/20-no-shared-transcode.conf
+[Service]
+Environment=NN_TRANSCODED=0
+
+# /etc/systemd/system/nn-video2.service.d/camid.conf
+[Service]
+# Event ids get this prefix so the hub attributes them to camera "cam1"
+# (see hub/cameras.py). Camera 1 needs no NN_CAM_ID: legacy unprefixed "ev-..."
+# events are attributed to the first camera.
+Environment=NN_CAM_ID=cam1
+
+# /etc/systemd/system/nn-video2.service.d/hls-wallclock.conf
+[Service]
+# cam1 is the only camera on the nn-transcoded path.  There, media time
+# runs ~1.3 s/min slower than wall clock, so ffmpeg-anchored
+# PROGRAM-DATE-TIME slides ~78 s/hour behind and the skew watchdog can
+# only bound the drift, not stop it (see _hls_ts in video_service.py).
+# Wall-clock stamping trades that unbounded accumulation for a bounded
+# one-off offset from the transcoder connect-time burst.
+Environment=NN_HLS_WALLCLOCK=1
+# Backstop: re-anchor well before the drift is user-visible.  45 s was
+# far too lax — cam1 sat at 14 s for hours and never tripped it.
+Environment=NN_HLS_PDT_MAX_SKEW=12
+
+# /etc/systemd/system/nn-video2.service.d/inferd.conf
+[Service]
+Environment=NN_INFERD_SOCK=/run/nn-inferd/sock
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen
+
+# /etc/systemd/system/nn-video2.service.d/transcoded.conf
+[Service]
+Environment=NN_TRANSCODED=1

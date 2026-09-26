@@ -1,0 +1,13 @@
+#!/bin/bash
+# Publish the serial ports the gateway ACTUALLY holds (root can read its
+# /proc fds; the hub cannot).  The Factory flash lockout reads this file
+# so it locks the real NCP port instead of every Espressif candidate —
+# which wrongly locked out a freshly plugged blank board (2026-08-27).
+P=$(pgrep -f "gw_linux (operate|provision-net)" | head -1)
+OUT=/run/nn-gw-active-ports
+if [ -n "$P" ]; then
+  readlink /proc/$P/fd/* 2>/dev/null | grep -E '^/dev/tty' | sort -u > "$OUT.tmp"
+  mv "$OUT.tmp" "$OUT"; chmod 644 "$OUT"
+else
+  : > "$OUT"; chmod 644 "$OUT"
+fi

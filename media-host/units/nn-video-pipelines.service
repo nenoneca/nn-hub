@@ -1,0 +1,27 @@
+[Unit]
+Description=nn-video pipelines — one process for every camera slot (phase 1: side by side with nn-video)
+After=network-online.target nn-inferd.service nn-transcoded.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONFAULTHANDLER=1
+# glibc: ~60 native threads would otherwise each grow a 64 MB arena of retained free memory
+Environment=MALLOC_ARENA_MAX=2
+# fixed mmap threshold: glibc otherwise raises it dynamically after the first freed frame-sized
+# block, and every later 3 MB frame is carved from an arena that keeps it after free
+Environment=MALLOC_MMAP_THRESHOLD_=1048576
+Environment=PYTHONPATH=/home/orangepi/nn_project_nowest/hub:/home/orangepi/nn_project_nowest/media/host
+Environment=NN_INFERD_SOCK=/run/nn-inferd/sock
+Environment=NN_ACCEL_GEN=/opt/nn-accel/gen
+# phase 1: API on 8880 and ingest on 8886 beside the supervisor (8899/8888 are its workers')
+ExecStart=/usr/bin/python3 -m nnvideo.service --store /var/lib/nn-media/nn-media.db --api-port 8880 --ingest-port 8886 --no-register
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

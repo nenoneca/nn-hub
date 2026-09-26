@@ -1,0 +1,6 @@
+# nn-hub Factory: whole-disk (micro-SD) flashing.  The hub's service user may
+# run exactly this helper as root, nothing else.  The helper re-validates the
+# target from the kernel (removable USB/SD, no system mounts, not the root
+# disk) — the privilege boundary is the script, not the hub.
+# Installed by deploy/install-sdflash.sh (which substitutes the user).
+%NN_HUB_USER% ALL=(root) NOPASSWD: /usr/local/sbin/nn-sdflash

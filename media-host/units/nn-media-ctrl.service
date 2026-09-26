@@ -1,0 +1,18 @@
+[Unit]
+Description=nn media control server (device control channel :8772)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+WorkingDirectory=/home/orangepi/nn_project_nowest/media/host
+# hub package provides hub.crypto / hub stores used by the control channel
+Environment=PYTHONPATH=/home/orangepi/nn_project_nowest/hub
+ExecStart=/usr/bin/python3 /home/orangepi/nn_project_nowest/media/host/media_ctrl_server.py \
+    --port 8772 --keydir /var/lib/nn-media/keys
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+#!/bin/bash
+# nn-ota fixed-layer launcher — deliberately too dumb to break.
+# All update logic lives in the bundle (current/agent.sh); this only
+# execs it, so the agent updates itself with the bundle.
+A=/opt/nn-app/current/agent.sh
+[ -x "$A" ] || { echo "[nn-ota-launcher] no agent at $A"; exit 0; }
+exec /bin/bash "$A"

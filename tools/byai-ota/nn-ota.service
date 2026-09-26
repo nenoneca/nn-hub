@@ -1,0 +1,7 @@
+[Unit]
+Description=nn app-bundle OTA agent (oneshot; logic lives in the bundle)
+After=network-online.target nn-npu.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nn-ota-launcher
